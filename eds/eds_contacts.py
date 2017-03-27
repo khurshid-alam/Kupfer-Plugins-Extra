@@ -15,6 +15,7 @@ import subprocess
 import hashlib
 import vobject
 import xdg.BaseDirectory as base
+from xml.dom import minidom
 gi.require_version('Gtk', '3.0')
 
 from kupfer import plugin_support
@@ -37,12 +38,26 @@ Contact_ID = "org.gnome.Contacts"
 
 #get Addressbook UIDs
 EDS_ADB_PATH = (os.path.join(base.xdg_data_home, "evolution/addressbook"))
-addressbook_uids = []
+EDS_ADB_WEB_PATH = (os.path.join(base.xdg_cache_home, "evolution/addressbook"))
+local_addressbook_uids = []
+web_addressbook_uids = []
 for dir in os.listdir(EDS_ADB_PATH):
     if dir != "trash":
-        addressbook_uids += [dir]
+        local_addressbook_uids += [dir]
 
-addressbook_uids = [word.replace('system','system-address-book') for word in addressbook_uids]
+local_addressbook_uids = [word.replace('system','system-address-book') for word in local_addressbook_uids]
+
+
+for dir in os.listdir(EDS_ADB_WEB_PATH):
+    if os.path.exists(EDS_ADB_WEB_PATH + "/" + dir + "/cache.xml"):
+        WEB_ADB_EXISTS = True
+        if dir != "trash":
+            web_addressbook_uids += [dir]
+            addressbook_uids = local_addressbook_uids + web_addressbook_uids
+
+    else:
+        WEB_ADB_EXISTS = False
+        addressbook_uids = local_addressbook_uids
 #print (addressbook_uids)
 
 #get EDS_FACTORY_BUS
@@ -118,17 +133,39 @@ class ComposeMail(RunnableLeaf):
 
 
 
+#Hack to get online contact ids like google, carddav etc.
+def _get_web_contacts_ids(addressbook_uid):
+    xmldoc = minidom.parse(EDS_ADB_WEB_PATH + "/" + addressbook_uid + "/cache.xml")    
+    itemlist = xmldoc.getElementsByTagName('object')
+    contact_pass_ids = []
+    for s in itemlist:
+        if s.attributes['uid'].value.startswith("http://"):
+            contact_pass_ids += [s.attributes['uid'].value]
+
+    return contact_pass_ids
+
+
+
+
+
 def _load_contacts(addressbook_uids):
     ''' Get service & ifcace name for each addressbooks and then load all contacts '''
     for addressbook_uid in addressbook_uids:
-        iface = _create_dbus_connection(EDS_FACTORY_BUS, EDS_FACTORY_OBJ, EDS_FACTORY_IFACE)
+        iface = _create_dbus_connection(EDS_FACTORY_BUS, EDS_FACTORY_OBJ, EDS_FACTORY_IFACE, activate=True)
         EDS_SUBPROCESS_OBJ, EDS_SUBPROCESS_BUS  = iface.OpenAddressBook(addressbook_uid)
         interface = _create_dbus_connection(EDS_SUBPROCESS_BUS, EDS_SUBPROCESS_OBJ, EDS_SUBPROCESS_IFACE)
         interface.Open() #otherwise it may fail
-        contact_pass_ids = interface.GetContactListUids("")
+
+        if os.path.exists(EDS_ADB_WEB_PATH + "/" + addressbook_uid + "/cache.xml"):
+            contact_pass_ids =  _get_web_contacts_ids(addressbook_uid)   
+        else:    
+            contact_pass_ids = interface.GetContactListUids("")
         for contact_pass_id in contact_pass_ids:
             #Lets form contact_uid from pass_id
-            contact_uid = "eds:" + addressbook_uid + ":" + contact_pass_id
+            if 'http://' in contact_pass_id:        
+                contact_uid = "eds:" + addressbook_uid + ":" + contact_pass_id.replace(":", "\\:")
+            else:
+                contact_uid = "eds:" + addressbook_uid + ":" + contact_pass_id
             #We also know individual id is just sha1 hash of uid, so
             m = hashlib.sha1()
             m.update(contact_uid.encode('UTF-8'))
