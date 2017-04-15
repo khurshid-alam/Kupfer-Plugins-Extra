@@ -1,7 +1,7 @@
 # -*- encoding: UTF-8 -*-
 __kupfer_name__ = _("Gnome Calendar")
-__kupfer_sources__ = ("CalendarSource", )
-__kupfer_actions__ = ("", )
+__kupfer_sources__ = ("EventSource", )
+__kupfer_actions__ = ("CreateGcalEvent", )
 __description__ = _("Search and open calendar events with Gnome-Calendar")
 __version__ = "2017.2"
 __author__ = ""
@@ -12,7 +12,7 @@ import os
 import dbus
 import gi
 import subprocess
-import hashlib
+import hashlib, ast
 import vobject
 import xdg.BaseDirectory as base
 gi.require_version('Gtk', '3.0')
@@ -36,6 +36,11 @@ OBJECT_NAME = "/org/gnome/Calendar/SearchProvider"
 IFACE_NAME = "org.gnome.Shell.SearchProvider2"
 
 
+EDS_CAL_PATH = (os.path.join(base.xdg_data_home, "evolution/calendar"))
+EDS_CAL_WEB_PATH = (os.path.join(base.xdg_cache_home, "evolution/calendar"))
+GCALD_CACHE = (os.path.join(base.xdg_data_home, "kupfer/plugins/gcald"))
+
+
 def _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=False):
     ''' Create dbus connection to Gnome Calendar
     @activate: true=starts Gnome Calendar if not running
@@ -53,8 +58,89 @@ def _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=Fals
         if obj:
             interface = dbus.Interface(obj, IFACE_NAME)
     except dbus.exceptions.DBusException as err:
-        pretty.print_debug(err)
+        pretty.print_debug(__name__, err)
     return interface
+
+
+def file_get_contents(filename):
+  if os.path.exists(filename):
+    fp = open(filename, "r")
+    content = fp.read()
+    fp.close()
+    return content
+
+
+def spawn_async(argv):
+    try:
+        utils.spawn_async_raise(argv)
+    except utils.SpawnError as exc:
+        raise OperationError(exc)
+
+
+def _get_calendar_uids(EDS_CAL_PATH, EDS_CAL_WEB_PATH):
+    local_calendar_uids = []
+    web_calendar_uids = []
+    for dir in os.listdir(EDS_CAL_PATH):
+        if dir != "trash":
+            local_calendar_uids += [dir]
+    local_calendar_uids = [word.replace('system','system-calendar') for word in local_calendar_uids]
+
+
+    for dir in os.listdir(EDS_CAL_WEB_PATH):
+        if os.path.exists(EDS_CAL_WEB_PATH + "/" + dir + "/calendar.ics"):
+            WEB_CAL_EXISTS = True
+            if os.path.exists(EDS_CAL_WEB_PATH + "/" + dir + "/keys.xml"):
+                if dir != "trash":
+                    web_calendar_uids += [dir]
+                    
+            calendar_uids_all = local_calendar_uids + web_calendar_uids
+
+        else:
+            WEB_CAL_EXISTS = False
+            calendar_uids_all = local_calendar_uids + web_calendar_uids
+
+    return calendar_uids_all
+
+
+def _load_calendars(calendar_uids):
+    cmd = 'syncevolution --print-databases | awk "/evolution-calendar:/{f=1;next} /Evolution Task/{f=0} f" | sed -e "s/^[ \t]*//" | grep -v "Birthdays & Anniversaries (birthdays)" | sed -e "s/<default>//g"'
+    cal_data = subprocess.check_output(cmd, shell=True)
+    cal_data = cal_data.decode("utf-8")
+    cal_data = cal_data.split("\n")
+    m = list(filter(None, cal_data))
+    cal_obj = {}
+
+    for i in m:
+        cald = i.split(" ")
+        cal_name = cald[0]
+        cal_uid = cald[1].strip("(").strip(")")
+        for l in calendar_uids:
+            if l == cal_uid:
+                cal_obj[cal_uid] = cal_name
+
+    return cal_obj
+
+
+
+def _load_gcals():
+    if os.path.exists(GCALD_CACHE):
+        cal_data = file_get_contents(GCALD_CACHE)
+        cal_data = ast.literal_eval(cal_data)
+        gcald = {}
+        for c in cal_data:
+            gcald[c] = ('_' + c)
+    else:
+        cmd = 'gcalcli list | grep owner | awk -F" " \'{print $3}\''
+        cal_data = ((subprocess.check_output(cmd, shell=True)).decode("utf-8")).split("\n")
+        cal_data = list(filter(None, cal_data))
+        with open(GCALD_CACHE,'w') as f:
+            f.write(str(cal_data))
+            f.close
+        gcald = {}
+        for c in cal_data:
+            gcald[c] = ('_' + c)
+
+    return gcald
 
 
 
@@ -68,20 +154,12 @@ def _load_events(interface):
             title = event_obj['name']
             due = event_obj['description']
             
-            oevent = Calendar(event_uid, title, due)
+            oevent = Event(event_uid, title, due)
             yield oevent
 
 
 
-def spawn_async(argv):
-    try:
-        utils.spawn_async_raise(argv)
-    except utils.SpawnError as exc:
-        raise OperationError(exc)
-
-
-
-class OpenCalendar (Action):
+class OpenCalendarEvent (Action):
     rank_adjust = 1
     action_accelerator = "o"
 
@@ -99,7 +177,54 @@ class OpenCalendar (Action):
         return _("Open calendar event in Gnome Calendar")
 
 
-class Calendar (Leaf):
+
+class CreateGcalEvent (Action):
+    def __init__(self):
+        Action.__init__(self, _("Create Event In Google Calendar"))
+
+    def activate(self, leaf, obj):
+        summary = leaf.object
+        gcal_uid = obj.cid
+        cmd = '\'gcalcli --calendar ' + gcal_uid + " " + '"' + summary + '"\''
+        subprocess.check_call(["gcalcli", "quick", "--calendar", gcal_uid, summary])
+
+    def item_types(self):
+        yield TextLeaf
+
+    def requires_object(self):
+        return True
+
+    def object_types(self):
+        yield Gcalendar
+
+    def object_source(self, for_item=None):
+        return GcalendarSource()
+
+    def get_description(self):
+        return _("Add event to existing calendar")
+
+    def get_icon_name(self):
+        return "list-add"
+
+
+
+class Gcalendar(Leaf):
+    def __init__(self, gcal_uid, gcal_name):
+        Leaf.__init__(self, gcal_uid, gcal_name)
+        self.cid = gcal_uid
+        self.title = gcal_name
+
+    def get_description(self):
+        descr = "Name : %s" % self.title
+        return descr
+
+    def get_icon_name(self):
+        return 'calendar'
+
+
+
+
+class Event (Leaf):
     def __init__(self, event_uid, title, due):
         Leaf.__init__(self, event_uid, title)
         self.eid = event_uid
@@ -114,15 +239,55 @@ class Calendar (Leaf):
         return 'calendar'
 
     def get_actions(self):
-        yield OpenCalendar()
+        yield OpenCalendarEvent()
 
 
-class CalendarSource (AppLeafContentMixin, ToplevelGroupingSource):
+class AccountStatus(Leaf):
+    pass
+
+
+class CalendarIdSource(Source):
+
+    def __init__(self):
+        Source.__init__(self, _("Calendar Source"))
+
+    def get_items(self):
+        calendar_uids = _get_calendar_uids(EDS_CAL_PATH, EDS_CAL_WEB_PATH)
+        cld = _load_calendars(calendar_uids)
+        for cal_uid, cal_name in cld.items():
+            yield Calendar(cal_uid, cal_name)
+
+    def provides(self):
+        yield Calendar
+
+
+
+
+
+class GcalendarSource(Source):
+
+    def __init__(self):
+        Source.__init__(self, _("Calendar Source"))
+
+    def get_items(self):
+        gcald = _load_gcals()
+        for gcal_uid, gcal_name in gcald.items():
+            yield Gcalendar(gcal_uid, gcal_name)
+
+    def provides(self):
+        yield Gcalendar
+
+
+
+
+
+
+class EventSource (AppLeafContentMixin, ToplevelGroupingSource):
     appleaf_content_id = Calendar_ID
 
     def __init__(self, name=None):
         ToplevelGroupingSource.__init__(self, name, _("Calendar Events"))
-        self._calendar = []
+        self._event = []
         self._version = 3
 
     def initialize(self):
@@ -131,11 +296,14 @@ class CalendarSource (AppLeafContentMixin, ToplevelGroupingSource):
 
     def get_items(self):
         interface = _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=True)
-        self._calendar = list(_load_events(interface))
-        return self._calendar
+        if interface is not None:
+            self._event = list(_load_events(interface))
+        return self._event
 
     def get_icon_name(self):
         return 'calendar'
 
     def provides(self):
-        yield Calendar
+        yield Event
+
+

@@ -85,7 +85,7 @@ def _search_bus_name(SERVICE_NAME_FILTER, activate=False):
         if eds_adb:
             EDS_FACTORY_BUS = eds_adb[0]
     except dbus.exceptions.DBusException as err:
-        pretty.print_debug(err)
+        pretty.print_debug(__name__, err)
     return EDS_FACTORY_BUS
                 
 EDS_FACTORY_BUS = _search_bus_name("org.gnome.evolution.dataserver.AddressBook")
@@ -111,7 +111,7 @@ def _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=Fals
         if obj:
             interface = dbus.Interface(obj, IFACE_NAME)
     except dbus.exceptions.DBusException as err:
-        pretty.print_debug(err)
+        pretty.print_debug(__name__, err)
     return interface
 
 
@@ -184,11 +184,16 @@ def _load_contacts(addressbook_uids):
                 telephones = [""]
             cobj = {"EMAIL": emails, "TEL": telephones}
 
-            if "FN" in vcard.behavior.knownChildren:
+            if "fn" in vcard.contents:
                 full_name = vcard.fn.value
-            elif "N" in vcard.behavior.knownChildren:
-                full_name = vcard.n.value
+            elif "n" in vcard.contents:
+                name_given = vcard.n.value.given
+                name_family = vcard.n.value.family
+                full_name = name_given + name_family
             else:
+                continue
+
+            if full_name == "":
                 continue
 
             ocontact = GnomeContact(contact_individual_id, full_name, cobj)
