@@ -239,17 +239,15 @@ class NewMailAction(Action):
     #def activate(self, leaf):
         #self.activate_multiple((leaf, ))
 
-    def activate(self, leaf):
+    def activate(self, leaf, email_leaf=None):
         print(leaf.telephones)
-        if len(leaf.emails) > 1:
-            ems = leaf.emails
-            eids = ",".join(e for e in ems)
-            spawn_async(["xdg-open", "mailto:%s" % eids])
-        else:
-            spawn_async(["xdg-open", "mailto:%s" % leaf.emails[0]])
+        if email_leaf:
+            email = email_leaf.object
+            spawn_async(["xdg-open", "mailto:%s" % email])
 
-    def valid_for_item(self, item):
-        return bool(is_valid_email(item.emails[0]) and item.emails[0])
+    def valid_for_item(self, leaf):
+        print (leaf.emails[0])
+        return bool(is_valid_email(leaf.emails[0]) and leaf.emails[0])
 
     def get_icon_name(self):
         return "mail-message-new"
@@ -259,6 +257,16 @@ class NewMailAction(Action):
         # we can enter email
         #yield TextLeaf
         #yield UrlLeaf
+
+    def requires_object(self):
+        return True
+
+    def object_source(self, for_item=None):
+        if for_item:
+            return EmailSource(for_item)
+
+    def object_types(self, for_item=None):
+        yield TextLeaf
 
 
 
@@ -293,6 +301,21 @@ class GnomeContact (Leaf):
     def get_actions(self):
         yield OpenContact()
         yield NewMailAction()
+
+
+
+class EmailSource(Source):
+    def __init__(self, leaf):
+        Source.__init__(self, _("Emails"))
+        self.ems = leaf.emails
+
+    def item_types(self):
+        yield TextLeaf
+
+    def get_items(self):
+        for e in self.ems:
+            yield TextLeaf(e)
+
 
 
 

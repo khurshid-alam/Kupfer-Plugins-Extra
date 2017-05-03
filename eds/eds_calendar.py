@@ -204,7 +204,7 @@ class CreateGcalEvent (Action):
         return _("Add event to existing calendar")
 
     def get_icon_name(self):
-        return "list-add"
+        return "stock_new-appointment"
 
 
 
