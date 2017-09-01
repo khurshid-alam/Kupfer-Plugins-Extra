@@ -172,7 +172,11 @@ def _load_contacts(addressbook_uids):
             contact_individual_id = str(m.hexdigest())
 
             #we get contact vcard and parse it using python3-vobject
-            contact_vcard = interface.GetContact(contact_pass_id)
+            try:
+                contact_vcard = interface.GetContact(contact_pass_id)
+            except:
+                print ("Couldn't load contact..skipping {}".format(contact_pass_id))
+                
             vcard = vobject.readOne( contact_vcard )
             if 'email' in vcard.contents:
                 emails = [email.value for email in vcard.contents['email']]

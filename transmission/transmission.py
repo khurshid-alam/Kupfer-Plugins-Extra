@@ -228,8 +228,17 @@ class Torrent(Leaf):
         self.title = t_name
 
     def get_description(self):
-        descr = "Name : %s" % self.title
-        return descr
+        descr_static = "Name : %s" % self.title
+        
+        tc = _connect_rpc()
+        if tc:
+            descr = []
+            t = tc.get_torrent(self.hid)
+            t_status = t.status
+            t_completed = (t.percentDone)*100.00
+            descr.append("Status: %s" % t_status)
+        else
+            return descr_static
 
     def get_icon_name(self):
         return 'transmission'
