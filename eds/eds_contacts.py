@@ -16,7 +16,10 @@ import hashlib
 import vobject
 import xdg.BaseDirectory as base
 from xml.dom import minidom
-gi.require_version('Gtk', '3.0')
+gi.require_version('EBook', '1.2')
+
+from gi.repository import EBook
+from gi.repository import EDataServer, EBookContacts
 
 from kupfer import plugin_support
 from kupfer import pretty, utils
@@ -32,33 +35,14 @@ from kupfer.weaklib import dbus_signal_connect_weakly
 
 plugin_support.check_dbus_connection()
 
-
-
 Contact_ID = "org.gnome.Contacts"
 
-#get Addressbook UIDs
-EDS_ADB_PATH = (os.path.join(base.xdg_data_home, "evolution/addressbook"))
-EDS_ADB_WEB_PATH = (os.path.join(base.xdg_cache_home, "evolution/addressbook"))
-local_addressbook_uids = []
-web_addressbook_uids = []
-for dir in os.listdir(EDS_ADB_PATH):
-    if dir != "trash":
-        local_addressbook_uids += [dir]
 
-local_addressbook_uids = [word.replace('system','system-address-book') for word in local_addressbook_uids]
+#EDS SOURCES
+registry = EDataServer.SourceRegistry.new_sync(None)
+esources = EDataServer.SourceRegistry.list_enabled(registry, 
+                        EDataServer.SOURCE_EXTENSION_ADDRESS_BOOK)
 
-
-for dir in os.listdir(EDS_ADB_WEB_PATH):
-    if os.path.exists(EDS_ADB_WEB_PATH + "/" + dir + "/cache.xml"):
-        WEB_ADB_EXISTS = True
-        if dir != "trash":
-            web_addressbook_uids += [dir]
-            addressbook_uids = local_addressbook_uids + web_addressbook_uids
-
-    else:
-        WEB_ADB_EXISTS = False
-        addressbook_uids = local_addressbook_uids
-#print (addressbook_uids)
 
 #get EDS_FACTORY_BUS
 EDS_FACTORY_OBJ = "/org/gnome/evolution/dataserver/AddressBookFactory"
@@ -133,33 +117,37 @@ class ComposeMail(RunnableLeaf):
 
 
 
-#Hack to get online contact ids like google, carddav etc.
-def _get_web_contacts_ids(addressbook_uid):
-    xmldoc = minidom.parse(EDS_ADB_WEB_PATH + "/" + addressbook_uid + "/cache.xml")    
-    itemlist = xmldoc.getElementsByTagName('object')
-    contact_pass_ids = []
-    for s in itemlist:
-        if s.attributes['uid'].value.startswith("http://"):
-            contact_pass_ids += [s.attributes['uid'].value]
-
-    return contact_pass_ids
-
+def _get_contact_pass_ids(esource):
+    ebc = EBook.BookClient.connect_sync(esource, 5, None)
+    q = EBookContacts.BookQuery.vcard_field_exists("N")
+    qr = q.to_string()
+    ret, contact_pass_ids = ebc.get_contacts_uids_sync(qr, None)
+    if ret:
+        return contact_pass_ids
+    else:
+        return None
 
 
 
 
-def _load_contacts(addressbook_uids):
+def _load_contacts(esources):
     ''' Get service & ifcace name for each addressbooks and then load all contacts '''
-    for addressbook_uid in addressbook_uids:
+    for esource in esources:
+        adb_name = esource.get_display_name()
+        addressbook_uid = esource.get_uid()
+        if adb_name == "friends-twitter-contacts":
+            continue
+        
+        contact_pass_ids = _get_contact_pass_ids(esource)
+        
+        if contact_pass_ids is None:
+            continue
+
         iface = _create_dbus_connection(EDS_FACTORY_BUS, EDS_FACTORY_OBJ, EDS_FACTORY_IFACE, activate=True)
         EDS_SUBPROCESS_OBJ, EDS_SUBPROCESS_BUS  = iface.OpenAddressBook(addressbook_uid)
         interface = _create_dbus_connection(EDS_SUBPROCESS_BUS, EDS_SUBPROCESS_OBJ, EDS_SUBPROCESS_IFACE)
         interface.Open() #otherwise it may fail
 
-        if os.path.exists(EDS_ADB_WEB_PATH + "/" + addressbook_uid + "/cache.xml"):
-            contact_pass_ids =  _get_web_contacts_ids(addressbook_uid)   
-        else:    
-            contact_pass_ids = interface.GetContactListUids("")
         for contact_pass_id in contact_pass_ids:
             #Lets form contact_uid from pass_id
             if 'http://' in contact_pass_id:        
@@ -336,7 +324,7 @@ class GnomeContactsSource (AppLeafContentMixin, ToplevelGroupingSource, Source):
 
 
     def get_items(self):
-        self._gnomecontacts = list(_load_contacts(addressbook_uids))
+        self._gnomecontacts = list(_load_contacts(esources))
         return self._gnomecontacts
 
     def get_icon_name(self):
