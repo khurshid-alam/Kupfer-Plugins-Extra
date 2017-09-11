@@ -14,8 +14,12 @@ import gi
 import subprocess
 import hashlib, ast
 import vobject
+import datetime
 import xdg.BaseDirectory as base
+
+gi.require_version('Unity', '7.0')
 gi.require_version('Gtk', '3.0')
+from gi.repository import Unity, Dbusmenu
 
 from kupfer import plugin_support
 from kupfer import pretty, utils
@@ -143,19 +147,51 @@ def _load_gcals():
     return gcald
 
 
+    
+def check_item_activated_callback(menuitem, a, b):#main menu item
+    spawn_async(("gnome-calendar", "-u", b))
+
+    
+    
+def add_item_to_qlist(ql, item, name, uid, due):
+    due = due.split(".")[0]
+    d = datetime.datetime.strptime(due, "%A %d %B %Y")
+    d = d.date()
+    t = datetime.datetime.today()
+    t = t.date()
+    
+    if t == d:    
+        item = Dbusmenu.Menuitem.new ()
+        item.property_set (Dbusmenu.MENUITEM_PROP_LABEL, name)
+        item.property_set_bool (Dbusmenu.MENUITEM_PROP_VISIBLE, True)
+        item.connect ("item-activated", check_item_activated_callback, uid)
+        ql.child_append (item)
+        
+    else:
+        pass        
+
 
 
 def _load_events(interface):
+    # Quicklist integration
+    launcher = Unity.LauncherEntry.get_for_desktop_id ("org.gnome.Calendar.desktop")
+    ql = Dbusmenu.Menuitem.new ()
+    
     ''' Get all visible events from all active eds calendars '''
     event_uids = interface.GetInitialResultSet([""])
     for event_uid in event_uids:
+        item = "item" + str((event_uids.index(event_uid)))
         event_dict = interface.GetResultMetas([event_uid])
         for event_obj in event_dict:
             title = event_obj['name']
             due = event_obj['description']
+            add_item_to_qlist(ql, item, title, event_uid, due)
             
             oevent = Event(event_uid, title, due)
             yield oevent
+            
+    if ql is not None:        
+        launcher.set_property("quicklist", ql)
 
 
 
