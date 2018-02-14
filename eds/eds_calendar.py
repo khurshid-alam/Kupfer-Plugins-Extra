@@ -44,6 +44,8 @@ EDS_CAL_PATH = (os.path.join(base.xdg_data_home, "evolution/calendar"))
 EDS_CAL_WEB_PATH = (os.path.join(base.xdg_cache_home, "evolution/calendar"))
 GCALD_CACHE = (os.path.join(base.xdg_data_home, "kupfer/plugins/gcald"))
 
+alarms = MessagingMenu.App(desktop_id='org.gnome.Calendar.desktop')
+
 
 def _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=False):
     ''' Create dbus connection to Gnome Calendar
@@ -147,7 +149,7 @@ def _load_gcals():
     return gcald
 
 
-    
+# Quicklist functions    
 def check_item_activated_callback(menuitem, a, b):#main menu item
     spawn_async(("gnome-calendar", "-u", b))
 
@@ -171,11 +173,37 @@ def add_item_to_qlist(ql, item, name, uid, due):
         pass        
 
 
+# Messeging-Menu Function
+def source_activated(alarms, source_id):
+    #mmapp.remove_attention(source_id)
+    print('source {} activated'.format(source_id))
+    cmd = "gnome-calendar -u " + source_id
+    print(subprocess.check_output(cmd, shell=True))
+    alarms.remove_source(source_id)
+    alarms.unregister()
+    
+def set_alarm(event_uid, title, _d, t):
+    print ("{} is due at {}".format(title, _d))
+    alarms.register()
+    alarms.connect('activate-source', source_activated)
+
+    icon = Gio.ThemedIcon.new_with_default_fallbacks('org.gnome.clocks')
+
+    alarms.append_source_with_time(event_uid, icon, title + " @" + _d, t)
+    alarms.draw_attention(event_uid) 
+
 
 def _load_events(interface):
     # Quicklist integration
     launcher = Unity.LauncherEntry.get_for_desktop_id ("org.gnome.Calendar.desktop")
-    ql = Dbusmenu.Menuitem.new ()
+    try:
+        if ql:
+            for c in ql.get_children():
+                ql.child_delete(c)
+            ql = Dbusmenu.Menuitem.new ()
+    except:
+        print ("ql is not defined yet")    
+        ql = Dbusmenu.Menuitem.new ()
     
     ''' Get all visible events from all active eds calendars '''
     event_uids = interface.GetInitialResultSet([""])
@@ -185,8 +213,22 @@ def _load_events(interface):
         for event_obj in event_dict:
             title = event_obj['name']
             due = event_obj['description']
+            # Quicklist integration
             add_item_to_qlist(ql, item, title, event_uid, due)
             
+            # Messaging-Menu Integration
+            if "AM" in due or "PM" in due:
+                due = due.split(" IST.")[0]
+                d = datetime.datetime.strptime(due, "%A %d %B %Y %I:%M:%S %p")
+                d_stamp = d.strftime("%s")
+                _d = d.strftime("%-I:%M %p")
+                now = datetime.datetime.now()
+                d_timer = (d - datetime.timedelta(minutes = 15))
+                t = (int(d_stamp) * 1000 * 1000)
+                
+                if now >= d_timer:
+                    set_alarm(event_uid, title, _d, t)
+                        
             oevent = Event(event_uid, title, due)
             yield oevent
             

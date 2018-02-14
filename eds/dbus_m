@@ -1,0 +1,15 @@
+#!/bin/bash 
+
+
+OJECT="'org.gnome.evolution.dataserver.Subprocess.Backend.Calendarx1798x4'" 
+IFACE="'org.gnome.evolution.dataserver.Calendar'" 
+DPATH="'/org/gnome/evolution/dataserver/Subprocess/2356/2'" 
+echo $IFACE
+
+
+WATCH1="type='signal',sender=${OJECT},interface=${IFACE},path=${DPATH}" 
+WATCH2="type='signal',sender=${OJECT},interface=${IFACE},path=${DPATH},member='TaskModified'" 
+WATCH3="type='signal', sender=${OJECT}, interface=${IFACE}, path=${DPATH}, member='TaskDeleted'"
+
+
+dbus-monitor ${WATCH1}
