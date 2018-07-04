@@ -16,6 +16,7 @@ import hashlib, ast
 import vobject
 import datetime
 import xdg.BaseDirectory as base
+from libtools.json_tools import load_from_json, save_to_json
 
 gi.require_version('Unity', '7.0')
 gi.require_version('Gtk', '3.0')
@@ -29,6 +30,7 @@ from kupfer.objects import TextLeaf, NotAvailableError, AppLeaf
 from kupfer.objects import UrlLeaf, RunnableLeaf, FileLeaf
 from kupfer.obj.apps import AppLeafContentMixin
 from kupfer.obj.grouping import ToplevelGroupingSource
+from kupfer.obj.helplib import FilesystemWatchMixin
 
 plugin_support.check_dbus_connection()
 
@@ -42,9 +44,8 @@ IFACE_NAME = "org.gnome.Shell.SearchProvider2"
 
 EDS_CAL_PATH = (os.path.join(base.xdg_data_home, "evolution/calendar"))
 EDS_CAL_WEB_PATH = (os.path.join(base.xdg_cache_home, "evolution/calendar"))
+EDS_ALARMS_PATH = (os.path.join(base.xdg_data_home, "evolution/calendar/alarms"))
 GCALD_CACHE = (os.path.join(base.xdg_data_home, "kupfer/plugins/gcald"))
-
-alarms = MessagingMenu.App(desktop_id='org.gnome.Calendar.desktop')
 
 
 def _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=False):
@@ -81,6 +82,23 @@ def spawn_async(argv):
         utils.spawn_async_raise(argv)
     except utils.SpawnError as exc:
         raise OperationError(exc)
+        
+        
+def _get_calendar_dirs(EDS_CAL_PATH, EDS_CAL_WEB_PATH):
+    calendar_dirs = []
+    for d in os.listdir(EDS_CAL_PATH):
+        if d != "trash" and d!= "alarms":
+            dd = os.path.join(EDS_CAL_PATH, d)
+            calendar_dirs.append(dd)
+            
+    for d in os.listdir(EDS_CAL_WEB_PATH):
+        if d != "trash":
+            dd = os.path.join(EDS_CAL_WEB_PATH, d)
+            calendar_dirs.append(dd)
+            
+            
+    return calendar_dirs
+            
 
 
 def _get_calendar_uids(EDS_CAL_PATH, EDS_CAL_WEB_PATH):
@@ -149,61 +167,69 @@ def _load_gcals():
     return gcald
 
 
-# Quicklist functions    
+    
 def check_item_activated_callback(menuitem, a, b):#main menu item
     spawn_async(("gnome-calendar", "-u", b))
 
     
     
-def add_item_to_qlist(ql, item, name, uid, due):
-    due = due.split(".")[0]
-    d = datetime.datetime.strptime(due, "%A %d %B %Y")
-    d = d.date()
-    t = datetime.datetime.today()
-    t = t.date()
+def add_item_to_qlist(ql, item, name, uid, due, launcher):
+	y = str((datetime.datetime.now().year))
+
+	due = due.split("2018")[0]
+	due = due + '2018'
+	d = datetime.datetime.strptime(due, "%A %d %B %Y")
     
-    if t == d:    
-        item = Dbusmenu.Menuitem.new ()
-        item.property_set (Dbusmenu.MENUITEM_PROP_LABEL, name)
-        item.property_set_bool (Dbusmenu.MENUITEM_PROP_VISIBLE, True)
-        item.connect ("item-activated", check_item_activated_callback, uid)
-        ql.child_append (item)
-        
+	d = d.date()
+	t = datetime.datetime.today()
+	t = t.date()
+	
+	if t == d:
+		item = Dbusmenu.Menuitem.new ()
+		item.property_set (Dbusmenu.MENUITEM_PROP_LABEL, name)
+		item.property_set_bool (Dbusmenu.MENUITEM_PROP_VISIBLE, True)
+		item.connect ("item-activated", check_item_activated_callback, uid)
+		ql.child_append (item)
+		launcher.set_property("quicklist", ql)        
+	else:
+		pass        
+
+def update_alarm_disc(alarm_disc, event_uid, title, due):
+    due = due.split(" IST.")[0]
+    d = datetime.datetime.strptime(due, "%A %d %B %Y %I:%M:%S %p")
+    d_stamp = d.strftime("%s")
+    t = (int(d_stamp) * 1000 * 1000)
+    _d = d.strftime("%-I:%M %p")
+    now = datetime.datetime.now()
+    d_timer = (d - datetime.timedelta(minutes = 15))
+
+    if event_uid not in alarm_disc:
+        alarm_disc[event_uid] = {"alarm": True, "due": due, "title": title}
     else:
-        pass        
-
-
-# Messeging-Menu Function
-def source_activated(alarms, source_id):
-    #mmapp.remove_attention(source_id)
-    print('source {} activated'.format(source_id))
-    cmd = "gnome-calendar -u " + source_id
-    print(subprocess.check_output(cmd, shell=True))
-    alarms.remove_source(source_id)
-    alarms.unregister()
-    
-def set_alarm(event_uid, title, _d, t):
-    print ("{} is due at {}".format(title, _d))
-    alarms.register()
-    alarms.connect('activate-source', source_activated)
-
-    icon = Gio.ThemedIcon.new_with_default_fallbacks('org.gnome.clocks')
-
-    alarms.append_source_with_time(event_uid, icon, title + " @" + _d, t)
-    alarms.draw_attention(event_uid) 
+        if alarm_disc[event_uid]["due"] != due:
+            alarm_disc[event_uid]["alarm"] = True
+            alarm_disc[event_uid]["due"] = due
+            alarm_disc[event_uid]["title"] = title
+                  
+    save_to_json(alarm_disc,
+            os.path.join(EDS_ALARMS_PATH, "alarms.json"))
+            
+    return alarm_disc   
 
 
 def _load_events(interface):
+    #global ql
     # Quicklist integration
+    alarm_disc = load_from_json(os.path.join(EDS_ALARMS_PATH, "alarms.json"))
     launcher = Unity.LauncherEntry.get_for_desktop_id ("org.gnome.Calendar.desktop")
     try:
         if ql:
             for c in ql.get_children():
                 ql.child_delete(c)
-            ql = Dbusmenu.Menuitem.new ()
+            #ql = Dbusmenu.Menuitem.new ()
     except:
-        print ("ql is not defined yet")    
-        ql = Dbusmenu.Menuitem.new ()
+        pretty.print_debug(__name__, "ql is not defined yet")    
+        ql = Dbusmenu.Menuitem.new ()    
     
     ''' Get all visible events from all active eds calendars '''
     event_uids = interface.GetInitialResultSet([""])
@@ -213,27 +239,29 @@ def _load_events(interface):
         for event_obj in event_dict:
             title = event_obj['name']
             due = event_obj['description']
-            # Quicklist integration
-            add_item_to_qlist(ql, item, title, event_uid, due)
+            add_item_to_qlist(ql, item, title, event_uid, due, launcher)
             
-            # Messaging-Menu Integration
             if "AM" in due or "PM" in due:
-                due = due.split(" IST.")[0]
-                d = datetime.datetime.strptime(due, "%A %d %B %Y %I:%M:%S %p")
-                d_stamp = d.strftime("%s")
-                _d = d.strftime("%-I:%M %p")
-                now = datetime.datetime.now()
-                d_timer = (d - datetime.timedelta(minutes = 15))
-                t = (int(d_stamp) * 1000 * 1000)
-                
-                if now >= d_timer:
-                    set_alarm(event_uid, title, _d, t)
-                        
+                alarm_disc = update_alarm_disc(alarm_disc, event_uid, title, due)            
+            
             oevent = Event(event_uid, title, due)
             yield oevent
-            
-    if ql is not None:        
-        launcher.set_property("quicklist", ql)
+    
+    '''
+    alarm_disc1 = load_from_json(os.path.join(EDS_ALARMS_PATH, "alarms.json"))
+    for aid, ad in alarm_disc1.items():
+        if aid not in event_uids:
+            alarm_disc1.pop(event_uid)            
+            save_to_json(alarm_disc1,
+                os.path.join(EDS_ALARMS_PATH, "alarms.json"))
+    '''    
+    
+
+                    
+    if ql is not None:
+        for c in ql.get_children():
+            pretty.print_debug(__name__, c.property_get(Dbusmenu.MENUITEM_PROP_LABEL))        
+        #launcher.set_property("quicklist", ql)
 
 
 
@@ -360,7 +388,7 @@ class GcalendarSource(Source):
 
 
 
-class EventSource (AppLeafContentMixin, ToplevelGroupingSource):
+class EventSource (AppLeafContentMixin, ToplevelGroupingSource, FilesystemWatchMixin):
     appleaf_content_id = Calendar_ID
 
     def __init__(self, name=None):
@@ -370,6 +398,16 @@ class EventSource (AppLeafContentMixin, ToplevelGroupingSource):
 
     def initialize(self):
         ToplevelGroupingSource.initialize(self)
+        
+        eds_cache = _get_calendar_dirs(EDS_CAL_PATH, EDS_CAL_WEB_PATH)
+        if eds_cache:
+            self.monitor_token = self.monitor_directories(*eds_cache)
+        
+    def monitor_include_file(self, gfile):
+        return gfile and (gfile.get_basename().endswith('.ics') \
+                or (gfile.get_basename().endswith('.db') \
+                or gfile.get_basename() == 'calendar.ics') \
+                or gfile.get_basename() == 'cache.db')
 
 
     def get_items(self):
