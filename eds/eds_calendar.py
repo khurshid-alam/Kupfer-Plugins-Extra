@@ -321,6 +321,8 @@ def add_item_to_qlist(ql, item, name, uid, due, launcher):
 		name = name + " @ " + due[-8:] 
 		if now < d1:
 			add_event = True
+		else:
+			add_event = False
 	else:
 		d = datetime.datetime.strptime(due, "%A %d %B %Y")
 		add_event = True
@@ -330,6 +332,7 @@ def add_item_to_qlist(ql, item, name, uid, due, launcher):
 	t = t.date()
 	
 	if t == d and add_event:
+		print ("adding {} to quicklist".format(name))
 		item = Dbusmenu.Menuitem.new ()
 		item.property_set (Dbusmenu.MENUITEM_PROP_LABEL, name)
 		item.property_set_bool (Dbusmenu.MENUITEM_PROP_VISIBLE, True)
@@ -360,8 +363,9 @@ def update_alarm_disc(alarm_disc, event_uid, title, due):
 	alarm_disc1 = alarm_disc.copy() 
 	for event_uid, alarmd in alarm_disc.items():
 		alarm_due = alarm_disc[event_uid]["due"]
+		alarm_notify = alarm_disc[event_uid]["alarm"]
 		ad = datetime.datetime.strptime(due, "%A %d %B %Y %I:%M %p")
-		if now > ad or \
+		if (now > ad and not alarm_notify) or \
 				int(ad.strftime("%Y%m%d")) > int(EV_END):
 			alarm_disc1.pop(event_uid)
 		          
