@@ -52,13 +52,9 @@ class OpenAsRoot (Open):
 
 		for id_, leaves in leafmap.items():
 			app = appmap[id_]
-			# commandline usually involves %U and we don't want that
-			commandline = app.get_commandline()
-			if "%" in commandline:
-				commandline, subst = commandline.split (" %")
-				
+
 			cmd = "%s %s " %(__kupfer_settings__["sudo_command"],
-					commandline)
+					app.get_executable())
 			for l in leaves:
 				cmd += "%s " %l.object
 			ret = utils.launch_commandline(cmd)
