@@ -27,6 +27,7 @@ gi.require_version('Unity', '7.0')
 gi.require_version('Gtk', '3.0')
 gi.require_version('EDataServer', '1.2')
 
+from gi.repository import Gio, GLib
 from gi.repository import EDataServer
 from gi.repository import Unity, Dbusmenu
 
@@ -39,6 +40,7 @@ from kupfer.objects import UrlLeaf, RunnableLeaf, FileLeaf
 from kupfer.obj.apps import AppLeafContentMixin
 from kupfer.obj.grouping import ToplevelGroupingSource
 from kupfer.obj.helplib import FilesystemWatchMixin
+from kupfer.weaklib import dbus_signal_connect_weakly
 
 plugin_support.check_dbus_connection()
 
@@ -55,6 +57,10 @@ EDS_CAL_WEB_PATH = (os.path.join(base.xdg_cache_home, "evolution/calendar"))
 EDS_ALARMS_PATH = (os.path.join(base.xdg_data_home, "evolution/calendar/alarms"))
 GCALD_CACHE = (os.path.join(base.xdg_data_home, "kupfer/plugins/gcald"))
 
+launcher = Unity.LauncherEntry.get_for_desktop_id ("org.gnome.Calendar.desktop")
+S_OLD = None
+
+RELOAD_AGIAN = False
 MAX_ITEMS = 200
 dt = datetime.datetime.today()
 now = datetime.datetime.now()
@@ -338,7 +344,7 @@ def add_item_to_qlist(ql, item, name, uid, due, launcher):
 		item.property_set_bool (Dbusmenu.MENUITEM_PROP_VISIBLE, True)
 		item.connect ("item-activated", check_item_activated_callback, uid)
 		ql.child_append (item)
-		launcher.set_property("quicklist", ql)        
+		#launcher.set_property("quicklist", ql)
 	else:
 		pass        
 
@@ -382,13 +388,15 @@ def _load_events():
 	#global ql
 	# Quicklist integration
 	alarm_disc = load_from_json(os.path.join(EDS_ALARMS_PATH, "alarms.json"))
-	launcher = Unity.LauncherEntry.get_for_desktop_id ("org.gnome.Calendar.desktop")
-	try:
-		if ql:
-			for c in ql.get_children():
-				ql.child_delete(c)
-				#ql = Dbusmenu.Menuitem.new ()
-	except:
+	#launcher = Unity.LauncherEntry.get_for_desktop_id ("org.gnome.Calendar.desktop")
+	ql_old =  launcher.get_property("quicklist")
+	if ql_old:
+		#for c in ql_old.get_children():
+			#ql_old.child_delete(c)
+		ql_old = None
+		launcher.set_property("quicklist", None)
+		ql = Dbusmenu.Menuitem.new ()
+	else:
 		pretty.print_debug(__name__, "ql is not defined yet")    
 		ql = Dbusmenu.Menuitem.new ()    
     
@@ -422,6 +430,7 @@ def _load_events():
 		loc = event_obj['loc']
         
 		add_item_to_qlist(ql, item, title, event_uid, due, launcher)
+		launcher.set_property("quicklist", ql)
 
 		if "AM" in due or "PM" in due:
 			alarm_disc = update_alarm_disc(alarm_disc, event_uid, title, due)            
@@ -584,14 +593,24 @@ class EventSource (AppLeafContentMixin, ToplevelGroupingSource, FilesystemWatchM
 		
 		eds_cache = _get_calendar_dirs(EDS_CAL_PATH, EDS_CAL_WEB_PATH)
 		if eds_cache:
-		    self.monitor_token = self.monitor_directories(*eds_cache)
-		
+			#path = list(self.get_path())
+			self.monitor_token = self.monitor_directories(*eds_cache)
+
+		bus = dbus.SessionBus()
+		dbus_signal_connect_weakly(bus, "objects_modified", self._on_events_updated,
+									dbus_interface="org.gnome.evolution.dataserver.CalendarView")
+
 	def monitor_include_file(self, gfile):
 		return gfile and (gfile.get_basename().endswith('.ics') \
 		        or (gfile.get_basename().endswith('.db') \
 		        or gfile.get_basename() == 'calendar.ics') \
 		        or gfile.get_basename() == 'cache.db')
 
+	def _on_events_updated (self, name):
+		#s = name[0]
+		#s = (s[s.find("LAST-MODIFIED:")+len("LAST-MODIFIED:"):s.rfind("\nEND:VEVENT")])
+		self.mark_for_update()
+		#self.get_items()
 
 	def get_items(self):
 		#interface = _create_dbus_connection(SERVICE_NAME, OBJECT_NAME, IFACE_NAME, activate=True)
