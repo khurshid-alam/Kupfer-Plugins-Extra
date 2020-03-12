@@ -245,6 +245,7 @@ def _get_web_events(web_calendar_uids):
 	event_dict = {}	
 	for cal_uid in web_calendar_uids:
 		cache_db = os.path.join(EDS_CAL_WEB_PATH, cal_uid + "/cache.db" )
+		'''
 		with closing(sqlite3.connect(cache_db, timeout=1)) as conn:
 			c = conn.cursor()
 			c.execute("""SELECT ECacheObjects.occur_start
@@ -257,7 +258,7 @@ def _get_web_events(web_calendar_uids):
 				has_occur_start = True
 			else:
 				has_occur_start = False
-				
+			
 			if has_occur_start:	
 				with closing(sqlite3.connect(cache_db, timeout=1)) as conn:
 					c = conn.cursor()
@@ -285,30 +286,31 @@ def _get_web_events(web_calendar_uids):
 						event_dict[event_uid] = {"name": title, "due": due, "loc": loc}
 						
 			else:
-				with closing(sqlite3.connect(cache_db, timeout=1)) as conn:
-					c = conn.cursor()
-					c.execute("""SELECT ECacheUID, summary, 
-								 ECacheObj, location
-								 FROM ECacheObjects
-								 LIMIT 15""")
-					for event_uid, title, icalstream, loc in c:
-						event_uid = cal_uid + ":" + event_uid
-						title = title.title()
-						event = vobject.readOne(icalstream)
-						#print (event.contents)
-						due = event.dtstart.value
-						if int(due.strftime("%Y%m%d")) < int(EV_BEGIN) or \
-								int(due.strftime("%Y%m%d")) > int(EV_END):
-							continue
-						
-						if isinstance(due, datetime.datetime):
-							due = due.strftime("%A %d %B %Y %I:%M %p")
-						else:
-							due = due.strftime("%A %d %B %Y")
-							
-						if loc:
-							loc = loc.title()
-						event_dict[event_uid] = {"name": title, "due": due, "loc": loc}
+			'''
+		with closing(sqlite3.connect(cache_db, timeout=1)) as conn:
+			c = conn.cursor()
+			c.execute("""SELECT ECacheUID, summary, 
+						 ECacheObj, location
+						 FROM ECacheObjects
+						 LIMIT 15""")
+			for event_uid, title, icalstream, loc in c:
+				event_uid = cal_uid + ":" + event_uid
+				title = title.title()
+				event = vobject.readOne(icalstream)
+				#print (event.contents)
+				due = event.dtstart.value
+				if int(due.strftime("%Y%m%d")) < int(EV_BEGIN) or \
+						int(due.strftime("%Y%m%d")) > int(EV_END):
+					continue
+				
+				if isinstance(due, datetime.datetime):
+					due = due.strftime("%A %d %B %Y %I:%M %p")
+				else:
+					due = due.strftime("%A %d %B %Y")
+					
+				if loc:
+					loc = loc.title()
+				event_dict[event_uid] = {"name": title, "due": due, "loc": loc}
 					 	
 	return event_dict
 
@@ -331,7 +333,8 @@ def add_item_to_qlist(ql, item, name, uid, due, launcher):
 			add_event = False
 	else:
 		d = datetime.datetime.strptime(due, "%A %d %B %Y")
-		add_event = True
+		name = name + " @all-day"
+		add_event = False
     
 	d = d.date()
 	t = datetime.datetime.today()
@@ -344,7 +347,7 @@ def add_item_to_qlist(ql, item, name, uid, due, launcher):
 		item.property_set_bool (Dbusmenu.MENUITEM_PROP_VISIBLE, True)
 		item.connect ("item-activated", check_item_activated_callback, uid)
 		ql.child_append (item)
-		#launcher.set_property("quicklist", ql)
+		#launcher.set_property("quicklist", ql)        
 	else:
 		pass        
 
@@ -430,7 +433,7 @@ def _load_events():
 		loc = event_obj['loc']
         
 		add_item_to_qlist(ql, item, title, event_uid, due, launcher)
-		launcher.set_property("quicklist", ql)
+		#launcher.set_property("quicklist", ql)
 
 		if "AM" in due or "PM" in due:
 			alarm_disc = update_alarm_disc(alarm_disc, event_uid, title, due)            
@@ -439,7 +442,8 @@ def _load_events():
 			due = due + ", " + loc #we intend to location on leaf description
 		oevent = Event(event_uid, title, due)
 		yield oevent
-    
+
+	launcher.set_property("quicklist", ql)
 	'''
 	alarm_disc1 = load_from_json(os.path.join(EDS_ALARMS_PATH, "alarms.json"))
 	for aid, ad in alarm_disc1.items():
